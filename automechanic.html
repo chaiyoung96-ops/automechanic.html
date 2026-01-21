@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>오픈링크 협력사 현황</title>
+  <script src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=y42tkwc67w&submodules=geocoder"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Arial', sans-serif; margin: 20px; }
+    #map { width: 100%; height: 600px; border-radius: 8px; margin-top: 10px; }
+    #info-box { display: flex; flex-direction: row; justify-content: space-between; padding: 10px; background: #f4f6f8; margin-top: 10px; }
+    #info, #nearby-list { flex: 1; padding: 10px; }
+    #clicked-address, #clicked-location { font-weight: bold; font-size: 16px; margin-bottom: 5px; }
+    #clicked-address { color: #0077cc; }
+    #clicked-location { color: #92400e; background: #fff5cc; padding: 5px; border-left: 5px solid #facc15; }
+    .radius-buttons { margin: 10px 0; }
+    .radius-buttons button {
+      margin-right: 10px; padding: 5px 10px; border-radius: 5px;
+      background-color: #e0e7ff; border: none; cursor: pointer;
+    }
+    .radius-buttons button:hover { background-color: #c7d2fe; }
+    input[type="text"] {
+      padding: 6px; border-radius: 4px; border: 1px solid #ccc; width: 200px;
+    }
+    button {
+      padding: 6px 10px; border-radius: 4px; border: none;
+      background-color: #38bdf8; color: white; cursor: pointer;
+    }
+    button:hover { background-color: #0ea5e9; }
+    table {
+      width: 100%; border-collapse: collapse; margin-top: 10px;
+      font-size: clamp(12px, 1.1vw, 16px); table-layout: fixed;
+    }
+    th, td {
+      padding: 10px; text-align: center; border-bottom: 1px solid #ddd;
+      overflow-wrap: break-word; word-break: keep-all;
+    }
+    th { background-color: #eef2ff; cursor: pointer; }
+    th:hover { background-color: #dbeafe; }
+    tr:hover { background-color: #f9f9f9; }
+    .point-icon {
+      width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;
+    }
+
+    /* 인포카드 스타일 */
+    .info-card {
+      background: #ffffff;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      padding: 15px 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+      margin-top: 10px;
+      max-width: 600px;
+      font-size: 15px;
+      color: #1e293b;
+    }
+    .info-card .title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #2563eb;
+      margin-bottom: 8px;
+    }
+    .info-card .sub-info {
+      color: #475569;
+      margin-bottom: 5px;
+    }
+    .info-section {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed #cbd5e1;
+    }
+    .info-section strong {
+      color: #0f172a;
+    }
+    .info-tags {
+      display: flex;
+      gap: 10px;
+      margin-top: 5px;
+      flex-wrap: wrap;
+    }
+    .info-tag {
+      background-color: #f1f5f9;
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-weight: bold;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+  <img src="https://taksong-driver.openmile.kr/openlink.png" style="width: 139px; height: 22px;" />
+  <h2>🏢 오픈링크 협력사 현황</h2>
+
+  <div style="display:flex; justify-content: space-between; align-items:center;">
+    <div>
+      <input type="text" id="addressInput" placeholder="🔍 주소 입력">
+      <button onclick="searchAddress()">검색</button>
+      <span>또는 🗺️ 지도 클릭으로 선택</span>
+    </div>
+    <div style="margin-left: 350px;">
+      <label for="uploadExcel">📁 엑셀 업로드:</label>
+      <input type="file" id="uploadExcel" accept=".xlsx" onchange="loadFactoriesExcel(event)">
+    </div>
+  </div>
+
+  <div class="radius-buttons">
+    <label>📏 반경:</label>
+    <button onclick="setRadius(5)">5km</button>
+    <button onclick="setRadius(10)">10km</button>
+    <button onclick="setRadius(20)">20km</button>
+    <button onclick="setRadius(30)">30km</button>
+    <button onclick="setRadius(40)">40km</button>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="info-box">
+    <div id="info">
+      <div id="clicked-address">📍 표시지점의 주소가 표시됩니다.</div>
+      <div id="clicked-location">📍 선택된 위치: 없음</div>
+      <div id="factory-info">ℹ️ 협력사 정보가 여기에 표시됩니다.</div>
+    </div>
+    <div id="nearby-list">
+      <strong>📍 반경 내 협력사</strong>
+      <table id="factory-table">
+        <thead>
+          <tr>
+            <th>공업사명</th>
+            <th>거리(km)</th>
+            <th>일반수리</th>
+            <th>사고수리</th>
+            <th><img class="point-icon" src="https://i.namu.wiki/i/r6Nfd2W4VJfQJd0rMjfHzjzOjZD2HbWGsxHdaTh4aPqN8S1Dsp74jVYCwdXUcu9ry-6jzm5_JDWl7OmjIEaSMuPAnJr0WATQq0JLGrvgewEiKPC99V9c3MJThzQyXLQEDA2AOBqbn0cn-9tAhR5cnw.svg" alt="현대"></th>
+            <th><img class="point-icon" src="https://i.namu.wiki/i/LPxAPP6P7emfhzu6bzsn19bP1ZZXn2jshG9OPQ3z8P8oSnRbqsTV-mXvJYTzubY831Dh_-MPLWrNxg2_a5aQfe1nzq_Fst_fghKDKHA6TtheVMkKLhwsUdsF8VdcTBJgB4Qz9juN_kOPZ5PCnci1Lw.svg" alt="기아"></th>
+          </tr>
+        </thead>
+        <tbody id="factory-list"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let factories = [], map, circle = null, selectedMarker = null;
+    let radius = 10, markers = [], currentNearby = [];
+
+    function getStatusTag(flag) {
+      if (flag === '○') return '<span style="color:#2563eb;font-weight:bold">가능</span>';
+      if (flag === 'Ⅹ' || flag === 'X') return '<span style="color:#dc2626;font-weight:bold">불가능</span>';
+      return '<span style="color:#6b7280;">-</span>';
+    }
+
+    function showFactoryInfo(factory) {
+      document.getElementById('factory-info').innerHTML = `
+        <div class="info-card">
+          <div class="title">🚗 ${factory.name}</div>
+          <div class="sub-info">📍 ${factory.address}</div>
+          <div class="sub-info">🏷️ 등급: <strong>${factory.grade}</strong> &nbsp;&nbsp; ☎️ 연락처: <strong>${factory.phone || '-'}</strong></div>
+
+          <div class="info-section">
+            <strong>🛠️ 수리 가능여부</strong>
+            <div class="info-tags">
+              <span class="info-tag">일반수리: ${getStatusTag(factory.repairGeneral)}</span>
+              <span class="info-tag">사고수리: ${getStatusTag(factory.repairAccident)}</span>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <strong>📦 입고 정보</strong>
+            <div class="info-tags">
+              <span class="info-tag">🔧 월수리: ${factory.monthlyCapacity}</span>
+              <span class="info-tag">📥 현재입고: ${factory.currentIncoming}</span>
+              <span class="info-tag">🚚 입고가능: ${factory.possibleIncoming}</span>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <strong>🏭 제조사 포인트</strong>
+            <div class="info-tags">
+              <span class="info-tag">현대: ${getStatusTag(factory.pointHyundai)}</span>
+              <span class="info-tag">기아: ${getStatusTag(factory.pointKia)}</span>
+            </div>
+          </div>
+
+          ${factory.notes && factory.notes !== '0' ? `
+            <div class="info-section">
+              <strong>📝 참고사항</strong>
+              <div style="margin-top: 5px;">${factory.notes}</div>
+            </div>` : ''}
+        </div>
+      `;
+    }
+
+    function loadFactoriesExcel(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet);
+
+        factories = json.map(row => ({
+          name: row['협력사명'],
+          address: row['주소'],
+          phone: row['연락처'],
+          grade: row['급수'],
+          lat: row['위도'],
+          lng: row['경도'],
+          monthlyCapacity: row['월 수리가능대수'],
+          currentIncoming: row['현재 입고(예정)대수'],
+          possibleIncoming: row['입고가능대수'],
+          repairGeneral: row['일반'],
+          repairAccident: row['사고'],
+          pointHyundai: row['포인트(현대)'],
+          pointKia: row['포인트(기아)'],
+          notes: row['추가설명']
+        }));
+
+        markers.forEach(m => m.marker.setMap(null));
+        markers = [];
+
+        factories.forEach(factory => {
+          const pos = new naver.maps.LatLng(factory.lat, factory.lng);
+          const marker = new naver.maps.Marker({ position: pos, map });
+          marker.addListener('click', () => showFactoryInfo(factory));
+          markers.push({ marker, factory });
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function updateAddressLabel(latlng) {
+      naver.maps.Service.reverseGeocode({ coords: latlng }, function(status, response) {
+        if (status === naver.maps.Service.Status.OK) {
+          const addr = response.v2.address.roadAddress || response.v2.address.jibunAddress;
+          document.getElementById("clicked-location").innerText = `📍 선택된 위치: ${addr}`;
+        }
+      });
+    }
+
+    function updateMarkerStyles(center) {
+      const tbody = document.getElementById('factory-list');
+      tbody.innerHTML = '';
+      const lat = center.lat(), lng = center.lng();
+
+      currentNearby = markers.map(({ marker, factory }) => {
+        const dist = haversine(lat, lng, factory.lat, factory.lng) / 1000;
+        const inRange = dist <= radius;
+
+        marker.setIcon(inRange
+      ? { url: 'https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png' }
+      : { url: 'https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png' });
+
+        return inRange ? { ...factory, dist } : null;
+      }).filter(Boolean);
+
+      currentNearby.sort((a, b) => a.dist - b.dist);
+
+      for (const f of currentNearby) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${f.name}</td>
+          <td>${f.dist.toFixed(2)}</td>
+          <td>${getStatusTag(f.repairGeneral)}</td>
+          <td>${getStatusTag(f.repairAccident)}</td>
+          <td>${getStatusTag(f.pointHyundai)}</td>
+          <td>${getStatusTag(f.pointKia)}</td>
+        `;
+        tr.addEventListener('click', () => showFactoryInfo(f));
+        tbody.appendChild(tr);
+      }
+    }
+
+    function drawCircle(center) {
+      if (circle) circle.setMap(null);
+      circle = new naver.maps.Circle({
+        map, center,
+        radius: radius * 1000,
+        strokeColor: '#007aff',
+        strokeWeight: 2,
+        fillColor: '#cce5ff',
+        fillOpacity: 0.4
+      });
+    }
+
+    function setRadius(r) {
+      radius = r;
+      if (selectedMarker) {
+        drawCircle(selectedMarker.getPosition());
+        updateMarkerStyles(selectedMarker.getPosition());
+      }
+    }
+
+    function searchAddress() {
+      const query = document.getElementById('addressInput').value;
+      if (!query) return;
+      naver.maps.Service.geocode({ query }, function(status, response) {
+        if (status !== naver.maps.Service.Status.OK) {
+          alert('주소 검색 실패'); return;
+        }
+        const item = response.v2.addresses[0];
+        const latlng = new naver.maps.LatLng(item.y, item.x);
+        if (selectedMarker) selectedMarker.setMap(null);
+        selectedMarker = new naver.maps.Marker({
+          position: latlng, map,
+          icon: {
+            content: '<div style="width:10px;height:10px;border-radius:50%;background:#000;border:2px solid white;"></div>',
+            size: new naver.maps.Size(12, 12), anchor: new naver.maps.Point(6, 6)
+          }
+        });
+        map.setCenter(latlng);
+        updateAddressLabel(latlng);
+        drawCircle(latlng);
+        updateMarkerStyles(latlng);
+      });
+    }
+
+    function haversine(lat1, lng1, lat2, lng2) {
+      const R = 6371e3, toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function initMap() {
+      map = new naver.maps.Map('map', {
+        center: new naver.maps.LatLng(36.5, 127.5),
+        zoom: 8
+      });
+      naver.maps.Event.addListener(map, 'click', function(e) {
+        const latlng = e.coord;
+        if (selectedMarker) selectedMarker.setMap(null);
+        selectedMarker = new naver.maps.Marker({
+          position: latlng, map,
+          icon: {
+            content: '<div style="width:10px;height:10px;border-radius:50%;background:#000;border:2px solid white;"></div>',
+            size: new naver.maps.Size(12, 12), anchor: new naver.maps.Point(6, 6)
+          }
+        });
+        updateAddressLabel(latlng);
+        drawCircle(latlng);
+        updateMarkerStyles(latlng);
+      });
+    }
+
+    window.onload = initMap;
+  </script>
+</body>
+</html>
+
+
